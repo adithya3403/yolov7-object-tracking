@@ -1,3 +1,11 @@
+'''
+command: python detect_and_track.py --weights best.pt --source test2.mp4 --vi
+link for best.pt: https://drive.google.com/file/d/1HMo-eBzSYNQt5LXb1JiPBxfGFFQBdIZh/view?usp=share_link
+'''
+
+import math
+import time
+import geopy
 import os
 import cv2
 import time
@@ -7,7 +15,7 @@ from pathlib import Path
 from numpy import random
 from random import randint
 import torch.backends.cudnn as cudnn
-
+from dronekit import connect, VehicleMode, LocationGlobalRelative, LocationGlobal, Command
 from models.experimental import attempt_load
 from utils.datasets import LoadStreams, LoadImages
 from utils.general import check_img_size, check_requirements, \
@@ -22,6 +30,92 @@ from utils.download_weights import download
 #For SORT tracking
 import skimage
 from sort import *
+
+altitude=2.0
+lat_long=[]
+lat_long.append([28.7041, 77.1025])
+
+#............................... DroneKit Code ...............................
+class DroneControl(object):
+    def __init__(self, server_enabled=True):
+        self.gps_lock = False
+        self.altitude = 2.0
+
+        # Connect to the Vehicle
+        print('Connected to vehicle.')
+        self.vehicle = vehicle
+        self.commands = self.vehicle.commands
+        self.current_coords = []
+        self.webserver_enabled = server_enabled
+        print("DroneDelivery Start")
+
+        # Register observers
+        # self.vehicle.add_attribute_listener('location', self.location_callback)
+
+    def launch(self):
+        print("Waiting for location...")
+        while self.vehicle.location.global_frame.lat == 0:
+            time.sleep(0.1)
+        self.home_coords = [self.vehicle.location.global_frame.lat,
+                            self.vehicle.location.global_frame.lon]
+
+        print("Waiting for ability to arm...")
+        while not self.vehicle.is_armable:
+            time.sleep(.1)
+
+        print('Running initial boot sequence')
+        self.change_mode('GUIDED')
+        self.arm()
+        self.takeoff()
+
+    def takeoff(self):
+        print("Taking off")
+        self.vehicle.simple_takeoff(self.altitude)
+        while self.vehicle.location.global_relative_frame.alt < self.altitude * .95:
+            print("Altitude: " + str(self.vehicle.location.global_relative_frame.alt))
+            time.sleep(0.5)
+
+    def arm(self, value=True):
+        if value:
+            print('Waiting for arming...')
+            self.vehicle.armed = True
+            while not self.vehicle.armed:
+                time.sleep(.1)
+        else:
+            print("Disarming!")
+            self.vehicle.armed = False
+
+    def change_mode(self, mode):
+        print("Changing to mode: {0}".format(mode))
+
+        self.vehicle.mode = VehicleMode(mode)
+        # while self.vehicle.mode.name != mode:
+        #     print('  ... polled mode: {0}'.format(mode))
+        #     time.sleep(1)
+
+    def return_to_launch(self):
+        print("Returning to launch")
+        self.vehicle.mode = VehicleMode("RTL")
+
+    def getLat(self):
+        return self.vehicle.location.global_relative_frame.lat
+    
+    def getLon(self):
+        return self.vehicle.location.global_relative_frame.lon
+
+    def goto(self, lat, lon):
+        alt = self.altitude
+        print("Going to: {0}, {1}, {2}".format(lat, lon, alt))
+        self.vehicle.simple_goto(LocationGlobalRelative(lat, lon, alt))
+    
+    def geofence(self, lat, lon):
+        # using distance formula in meters using geopy
+        distance = geopy.distance.distance((lat, lon), (self.home_coords[0], self.home_coords[1])).m
+        if distance > 10:
+            print("Geofence breached")
+            return False
+        else:
+            return True
 
 #............................... Bounding Boxes Drawing ............................
 """Function to Draw Bounding boxes"""
@@ -51,6 +145,58 @@ def draw_boxes(img, bbox, identities=None, categories=None, names=None, save_wit
             txt_str += "\n"
             with open(path + '.txt', 'a') as f:
                 f.write(txt_str)
+
+        #............................... Display Details ............................
+        # plot the center of the screen in green color
+        cv2.circle(img, (int(img.shape[1]/2),int(img.shape[0]/2)), 6, (0,255,0),-1)
+        # draw a rectangle half the size of the screen in red color
+        cv2.rectangle(img, (int(img.shape[1]/4),int(img.shape[0]/4)), (int(img.shape[1]/4*3),int(img.shape[0]/4*3)), (0,0,255), 2)
+        # draw x and y axes inside the rectangle in red color
+        cv2.line(img, (int(img.shape[1]/4),int(img.shape[0]/2)), (int(img.shape[1]/4*3),int(img.shape[0]/2)), (0,0,255), 2)
+        cv2.line(img, (int(img.shape[1]/2),int(img.shape[0]/4)), (int(img.shape[1]/2),int(img.shape[0]/4*3)), (0,0,255), 2)
+        # if the whole object is inside the rectangle, draw a green rectangle around it
+
+        locked_flag = False
+        if (int(box[0]) > int(img.shape[1]/4) and int(box[1]) > int(img.shape[0]/4) and int(box[2]) < int(img.shape[1]/4*3) and int(box[3]) < int(img.shape[0]/4*3)):
+            cv2.rectangle(img, (int(box[0]),int(box[1])), (int(box[2]),int(box[3])), (0,255,0), 2)
+            # display "Locked" on the screen at the top left
+            cv2.putText(img, "Locked", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+            locked_flag = True
+
+        # else draw a red rectangle around it
+        else:
+            cv2.rectangle(img, (int(box[0]),int(box[1])), (int(box[2]),int(box[3])), (0,0,255), 2)
+            # display "Not locked" on the screen at the top left
+            cv2.putText(img, "Not locked", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+            locked_flag = False
+        #..............................................................................
+        
+        #...................................Angle..............................
+        # draw a line from the center of the screen to the center of the object
+        cv2.line(img, (int(img.shape[1]/2),int(img.shape[0]/2)), (int((box[0]+box[2])/2),int((box[1]+box[3])/2)), (0,255,0), 2)
+        # calculate the angle
+        def angle_between(p1, p2):
+            xDiff = p2[0] - p1[0]
+            yDiff = p2[1] - p1[1]
+            angle=math.degrees(math.atan2(yDiff, xDiff))
+            if angle<0:
+                angle=angle+360
+            return angle
+        angle = angle_between((int(img.shape[1]/2),int(img.shape[0]/2)), (int((box[0]+box[2])/2),int((box[1]+box[3])/2)))
+        # display the angle between east and the line
+        cv2.putText(img, str(angle), (int((box[0]+box[2])/2),int((box[1]+box[3])/2)),cv2.FONT_HERSHEY_SIMPLEX, 0.6, [0, 0, 255], 2)
+        #..............................................................................
+        
+        #...................................Latitude and Longitude..............................
+        # calculate the latitude and longitude of the object
+        init_lat, init_long=28.7041, 77.1025
+        lat, long=init_lat+((int((box[0]+box[2])/2)-int(img.shape[1]/2))*altitude/111111), init_long+((int((box[1]+box[3])/2)-int(img.shape[0]/2))*altitude/111111)
+        # display the latitude and longitude
+        cv2.putText(img, "Lat:"+str(lat), (10, img.shape[0]-30),cv2.FONT_HERSHEY_SIMPLEX, 0.6, [255, 0, 0], 2)
+        cv2.putText(img, "Long:"+str(long), (10, img.shape[0]-10),cv2.FONT_HERSHEY_SIMPLEX, 0.6, [255, 0, 0], 2)
+        lat_long.append([lat,long])
+        #..............................................................................
+
     return img
 #..............................................................................
 
@@ -273,6 +419,13 @@ def detect(save_img=False):
 
     print(f'Done. ({time.time() - t0:.3f}s)')
 
+    # using geopy to calculate distance between two points
+    from geopy.distance import geodesic
+    init_lat_long=lat_long[0]
+    final_lat_long=lat_long[-1]
+    distance=geodesic(init_lat_long,final_lat_long).kilometers
+    print("The distance travelled by the vehicle is: ", distance, "km")
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -299,14 +452,33 @@ if __name__ == '__main__':
     parser.add_argument('--colored-trk', action='store_true', help='assign different color to every track')
     parser.add_argument('--save-bbox-dim', action='store_true', help='save bounding box dimensions with --save-txt tracks')
     parser.add_argument('--save-with-object-id', action='store_true', help='save results with object id to *.txt')
+    parser.add_argument('--connect', type=str, default=None, help='dronekit connection string')
 
     parser.set_defaults(download=True)
     opt = parser.parse_args()
-    print(opt)
+    # print(opt)
     #check_requirements(exclude=('pycocotools', 'thop'))
-    if opt.download and not os.path.exists(str(opt.weights)):
-        print('Model weights not found. Attempting to download now...')
-        download('./')
+    # if opt.download and not os.path.exists(str(opt.weights)):
+    #     print('Model weights not found. Attempting to download now...')
+    #     download('./')
+
+    # if (opt.connect == None):
+    #     print("No connection string provided\nConnecting to SITL")
+    #     import dronekit_sitl
+    #     sitl = dronekit_sitl.start_default()
+    #     connection_string = sitl.connection_string()
+    # else:
+    #     connection_string = opt.connect
+
+    # connecting to the vehicle
+    import dronekit_sitl
+    sitl=dronekit_sitl.start_default()
+    connection_string=sitl.connection_string()
+    print('Connecting to vehicle on: %s' % connection_string)
+    vehicle = connect(connection_string, wait_ready=False)
+    
+    drone = DroneControl(vehicle)
+    drone.launch()
 
     with torch.no_grad():
         if opt.update:  # update all models (to fix SourceChangeWarning)
