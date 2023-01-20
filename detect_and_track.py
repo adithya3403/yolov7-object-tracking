@@ -461,7 +461,7 @@ if __name__ == '__main__':
     parser.add_argument('--save-bbox-dim', action='store_true', help='save bounding box dimensions with --save-txt tracks')
     parser.add_argument('--save-with-object-id', action='store_true', help='save results with object id to *.txt')
     parser.add_argument('--connect', type=str, default=None, help='dronekit connection string')
-    parse.add_argument('--altitude', type=float, default=2, help='altitude of the drone')
+    parser.add_argument('--altitude', type=float, default=2, help='altitude of the drone')
 
     parser.set_defaults(download=True)
     opt = parser.parse_args()
