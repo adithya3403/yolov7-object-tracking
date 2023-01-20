@@ -31,7 +31,8 @@ from utils.download_weights import download
 import skimage
 from sort import *
 
-altitude=2.0
+#For DroneKit
+altitude = 0
 lat_long=[]
 lat_long.append([28.7041, 77.1025])
 
@@ -53,30 +54,37 @@ class DroneControl(object):
         # self.vehicle.add_attribute_listener('location', self.location_callback)
 
     def launch(self):
-        print("Waiting for location...")
-        while self.vehicle.location.global_frame.lat == 0:
-            time.sleep(0.1)
-        self.home_coords = [self.vehicle.location.global_frame.lat,
-                            self.vehicle.location.global_frame.lon]
+        # This functions changes the mode to GUIDED and arms the motors and then takes off to the given altitude
 
-        print("Waiting for ability to arm...")
+        print("Basic pre-arm checks")
+        # Don't try to arm until autopilot is ready
         while not self.vehicle.is_armable:
-            time.sleep(.1)
+            print(" Waiting for vehicle to initialise...")
+            time.sleep(0.5)
+        
+        # Copter should arm in GUIDED mode
+        self.change_mode("GUIDED")
 
-        print('Running initial boot sequence')
-        self.change_mode('GUIDED')
+        # Arming motors in GUIDED mode
         self.arm()
+
+        # taking off to given altitude
         self.takeoff()
+
 
     def takeoff(self):
         print("Taking off")
         self.vehicle.simple_takeoff(self.altitude)
-        while self.vehicle.location.global_relative_frame.alt < self.altitude * .95:
-            print("Altitude: " + str(self.vehicle.location.global_relative_frame.alt))
-            time.sleep(0.5)
+        while True:
+            print("Altitude : ", self.vehicle.location.global_relative_frame.alt)
+            if self.vehicle.location.global_relative_frame.alt >= self.altitude * 0.95:
+                print("Reached target altitude")
+                break
+            time.sleep(1)
 
     def arm(self, value=True):
         if value:
+            print("Arming motors") 
             print('Waiting for arming...')
             self.vehicle.armed = True
             while not self.vehicle.armed:
@@ -453,6 +461,7 @@ if __name__ == '__main__':
     parser.add_argument('--save-bbox-dim', action='store_true', help='save bounding box dimensions with --save-txt tracks')
     parser.add_argument('--save-with-object-id', action='store_true', help='save results with object id to *.txt')
     parser.add_argument('--connect', type=str, default=None, help='dronekit connection string')
+    parse.add_argument('--altitude', type=float, default=2, help='altitude of the drone')
 
     parser.set_defaults(download=True)
     opt = parser.parse_args()
@@ -462,22 +471,20 @@ if __name__ == '__main__':
     #     print('Model weights not found. Attempting to download now...')
     #     download('./')
 
-    # if (opt.connect == None):
-    #     print("No connection string provided\nConnecting to SITL")
-    #     import dronekit_sitl
-    #     sitl = dronekit_sitl.start_default()
-    #     connection_string = sitl.connection_string()
-    # else:
-    #     connection_string = opt.connect
+    if (opt.connect == None):
+        print("No connection string provided\nConnecting to SITL")
+        import dronekit_sitl
+        sitl = dronekit_sitl.start_default()
+        connection_string = sitl.connection_string()
+    else:
+        connection_string = opt.connect
 
-    # connecting to the vehicle
-    import dronekit_sitl
-    sitl=dronekit_sitl.start_default()
-    connection_string=sitl.connection_string()
     print('Connecting to vehicle on: %s' % connection_string)
-    vehicle = connect(connection_string, wait_ready=False)
+    vehicle = connect(connection_string, wait_ready=True)
     
     drone = DroneControl(vehicle)
+    drone.altitude = opt.altitude
+    lat_long.append(vehicle.location.global_relative_frame)
     drone.launch()
 
     with torch.no_grad():
