@@ -11,6 +11,7 @@ import cv2
 import time
 import torch
 import argparse
+from geopy.distance import geodesic
 from pathlib import Path
 from numpy import random
 from random import randint
@@ -32,9 +33,9 @@ import skimage
 from sort import *
 
 #For DroneKit
-altitude = 0
+altitude = 2.0
 lat_long=[]
-lat_long.append([28.7041, 77.1025])
+
 
 #............................... DroneKit Code ...............................
 class DroneControl(object):
@@ -154,56 +155,108 @@ def draw_boxes(img, bbox, identities=None, categories=None, names=None, save_wit
             with open(path + '.txt', 'a') as f:
                 f.write(txt_str)
 
-        #............................... Display Details ............................
+        # ............................... Display Details ............................
         # plot the center of the screen in green color
-        cv2.circle(img, (int(img.shape[1]/2),int(img.shape[0]/2)), 6, (0,255,0),-1)
-        # draw a rectangle half the size of the screen in red color
-        cv2.rectangle(img, (int(img.shape[1]/4),int(img.shape[0]/4)), (int(img.shape[1]/4*3),int(img.shape[0]/4*3)), (0,0,255), 2)
-        # draw x and y axes inside the rectangle in red color
-        cv2.line(img, (int(img.shape[1]/4),int(img.shape[0]/2)), (int(img.shape[1]/4*3),int(img.shape[0]/2)), (0,0,255), 2)
-        cv2.line(img, (int(img.shape[1]/2),int(img.shape[0]/4)), (int(img.shape[1]/2),int(img.shape[0]/4*3)), (0,0,255), 2)
-        # if the whole object is inside the rectangle, draw a green rectangle around it
+        cv2.circle(img, (int(img.shape[1]/2),int(img.shape[0]/2)), 6, (0, 255, 0), -1)
 
+        # draw a rectangle half the size of the screen in white color
+        cv2.rectangle(img, (int(img.shape[1]/4), int(img.shape[0]/4)),(int(img.shape[1]/4*3), int(img.shape[0]/4*3)), (255, 255, 255), 2)
+
+        # draw x and y axes for the whole frame
+        cv2.line(img, (0, int(img.shape[0]/2)), (img.shape[1], int(img.shape[0]/2)), (255, 255, 255), 2)
+        cv2.line(img, (int(img.shape[1]/2), 0), (int(img.shape[1]/2), img.shape[0]), (255, 255, 255), 2)
+
+
+        # if the whole object is inside the rectangle, draw a green rectangle around it
         locked_flag = False
         if (int(box[0]) > int(img.shape[1]/4) and int(box[1]) > int(img.shape[0]/4) and int(box[2]) < int(img.shape[1]/4*3) and int(box[3]) < int(img.shape[0]/4*3)):
-            cv2.rectangle(img, (int(box[0]),int(box[1])), (int(box[2]),int(box[3])), (0,255,0), 2)
+            cv2.rectangle(img, (int(box[0]), int(box[1])), (int(box[2]), int(box[3])), (0, 255, 0), 2)
             # display "Locked" on the screen at the top left
-            cv2.putText(img, "Locked", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+            cv2.putText(img, "Locked", (10, 30),cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
             locked_flag = True
 
         # else draw a red rectangle around it
         else:
-            cv2.rectangle(img, (int(box[0]),int(box[1])), (int(box[2]),int(box[3])), (0,0,255), 2)
+            cv2.rectangle(img, (int(box[0]), int(box[1])), (int(box[2]), int(box[3])), (0, 0, 255), 2)
             # display "Not locked" on the screen at the top left
-            cv2.putText(img, "Not locked", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+            cv2.putText(img, "Not locked", (10, 30),cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
             locked_flag = False
-        #..............................................................................
-        
-        #...................................Angle..............................
+        # ..............................................................................
+
+        # ...................................Angle..............................
         # draw a line from the center of the screen to the center of the object
-        cv2.line(img, (int(img.shape[1]/2),int(img.shape[0]/2)), (int((box[0]+box[2])/2),int((box[1]+box[3])/2)), (0,255,0), 2)
-        # calculate the angle
-        def angle_between(p1, p2):
-            xDiff = p2[0] - p1[0]
-            yDiff = p2[1] - p1[1]
-            angle=math.degrees(math.atan2(yDiff, xDiff))
+        cv2.line(img, (int(img.shape[1]/2), int(img.shape[0]/2)),(int((box[0]+box[2])/2), int((box[1]+box[3])/2)), (191, 191, 191), 2)
+
+        # calculate the angle between north and the line
+        def get_relative_bearing(p1, p2):
+            # p1 -> 0, 0
+            # p2 -> p2 - p1
+            x1, y1 = 0, 0
+            x2, y2 = p2[0] - p1[0], p2[1] - p1[1]
+            # Calculate the angle in degrees in clockwise direction with respect to the y-axis
+            angle = math.degrees(math.atan2(x2, y2))
             if angle<0:
-                angle=angle+360
+                angle+=360
             return angle
-        angle = angle_between((int(img.shape[1]/2),int(img.shape[0]/2)), (int((box[0]+box[2])/2),int((box[1]+box[3])/2)))
+
+        def get_true_bearing(relative_bearing):
+            return (drone.vehicle.heading + relative_bearing)%360
+
+        relative_bearing = get_relative_bearing((int(img.shape[1]/2), int(img.shape[0]/2)), (int((box[0]+box[2])/2), int((box[1]+box[3])/2)))
+        true_bearing = get_true_bearing(relative_bearing)
+
         # display the angle between east and the line
-        cv2.putText(img, str(angle), (int((box[0]+box[2])/2),int((box[1]+box[3])/2)),cv2.FONT_HERSHEY_SIMPLEX, 0.6, [0, 0, 255], 2)
-        #..............................................................................
-        
-        #...................................Latitude and Longitude..............................
+        cv2.putText(img, str(relative_bearing), (int(
+            (box[0]+box[2])/2), int((box[1]+box[3])/2)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, [0, 0, 255], 2)
+        # ..............................................................................
+
+        # ...................................Relative and True Distance..............................
+
+        def GSD(focal_length, sensor_width, image_width, altitude):
+            return (sensor_width * altitude) / (image_width * focal_length)
+
+        # gives us the distance between the center of the screen and the center of the object in pixels
+        def get_relative_distance(p1, p2):
+            # p1 -> 0, 0
+            # p2 -> p2 - p1
+            x1, y1 = 0, 0
+            x2, y2 = p2[0] - p1[0], p2[1] - p1[1]
+            # Calculate the distance
+            distance = math.sqrt(x2**2 + y2**2)
+            return distance
+
+        # below units are in pixels
+        relative_distance = get_relative_distance((int(img.shape[1]/2), int(img.shape[0]/2)), (int((box[0]+box[2])/2), int((box[1]+box[3])/2)))
+
+        # gives us the distance from the drone to the object in meters
+        def Get_true_distance(relative_distance, altitude):
+            # relative_distance -> pixels
+            # altitude -> meters
+            # true_distance -> meters
+            focal_length = 3.04
+            sensor_width = 3.68
+            image_width = img.shape[1]
+            true_distance = GSD(focal_length, sensor_width, image_width, altitude) * relative_distance
+            return true_distance
+        true_distance = Get_true_distance(relative_distance, drone.vehicle.location.global_relative_frame.alt)
+        # ..............................................................................
+
+        # ...................................Latitude and Longitude..............................
         # calculate the latitude and longitude of the object
-        init_lat, init_long=28.7041, 77.1025
-        lat, long=init_lat+((int((box[0]+box[2])/2)-int(img.shape[1]/2))*altitude/111111), init_long+((int((box[1]+box[3])/2)-int(img.shape[0]/2))*altitude/111111)
+        origin = geopy.Point(drone.vehicle.location.global_relative_frame.lat, drone.vehicle.location.global_relative_frame.lon)
+        destination = geodesic(meters=true_distance).destination(origin, true_bearing)
+        lat, long = destination.latitude, destination.longitude
+
         # display the latitude and longitude
-        cv2.putText(img, "Lat:"+str(lat), (10, img.shape[0]-30),cv2.FONT_HERSHEY_SIMPLEX, 0.6, [255, 0, 0], 2)
-        cv2.putText(img, "Long:"+str(long), (10, img.shape[0]-10),cv2.FONT_HERSHEY_SIMPLEX, 0.6, [255, 0, 0], 2)
-        lat_long.append([lat,long])
-        #..............................................................................
+        cv2.putText(img, "Lat:"+str(lat), (10, img.shape[0]-30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, [255, 0, 0], 2)
+        cv2.putText(img, "Long:"+str(long), (10, img.shape[0]-10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, [255, 0, 0], 2)
+        # ..............................................................................
+
+        # ...................................Goto for drone..............................
+        # if the object is not locked and within the geofence go to the object
+        if not locked_flag and drone.geofence(lat, long):
+            drone.goto(lat, long)
+            print("Going to the object")
 
     return img
 #..............................................................................
@@ -354,8 +407,7 @@ def detect(save_img=False):
                     # color = compute_color_for_labels(id)
                     #draw colored tracks
                     if colored_trk:
-                        [cv2.line(im0, (int(track.centroidarr[i][0]),
-                                    int(track.centroidarr[i][1])), 
+                        [cv2.line(im0, (int(track.centroidarr[i][0]),                                    int(track.centroidarr[i][1])), 
                                     (int(track.centroidarr[i+1][0]),
                                     int(track.centroidarr[i+1][1])),
                                     rand_color_list[track.id], thickness=2) 
