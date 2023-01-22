@@ -620,4 +620,4 @@ if __name__ == '__main__':
         else:
             detect()
 
-# python detect_and_track.py --weights best.pt --source 1 --view-img --baud 57600 --connect com3 --altitude 4 --view-img --device 0
+# python detect_and_track.py --weights best.pt --source 1 --view-img --baud 57600 --connect com3 --altitude 4 --device 0
