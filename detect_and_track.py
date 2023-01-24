@@ -77,7 +77,7 @@ class DroneControl(object):
             if self.vehicle.location.global_relative_frame.alt >= self.altitude * 0.95:
                 print("Reached target altitude")
                 break
-            time.sleep(.5)
+            time.sleep(.1)
 
     def arm(self, value=True):
         if value:
@@ -112,6 +112,8 @@ class DroneControl(object):
         alt = self.altitude
         print("Going to: {0}, {1}, {2}".format(lat, lon, alt))
         self.vehicle.simple_goto(LocationGlobalRelative(lat, lon, alt))
+        # speed should always be 0.7m/s
+        # self.vehicle.groundspeed = 0.7
 
     def geofence(self, lat, lon):
         # using distance formula in meters using geopy
@@ -137,7 +139,7 @@ def get_relative_bearing(p1, p2):
 
 
 def get_true_bearing(relative_bearing):
-    return (drone.vehicle.heading + relative_bearing) % 360
+    return (360 - drone.vehicle.heading + relative_bearing) % 360
 
 
 def GSD(focal_length, sensor_width, image_width, altitude):
@@ -162,6 +164,7 @@ def Get_true_distance(relative_distance, altitude, image_width):
     # relative_distance -> pixels
     # altitude -> meters
     # true_distance -> meters
+    # camera specs of Raspberry Pi Camera V2
     focal_length = 3.04
     sensor_width = 3.68
     true_distance = GSD(focal_length, sensor_width,
@@ -187,75 +190,62 @@ def draw_boxes(img, bbox, identities=None, categories=None, names=None, save_wit
         (w, h), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 1)
         cv2.rectangle(img, (x1, y1), (x2, y2), (255, 0, 20), 2)
         cv2.rectangle(img, (x1, y1 - 20), (x1 + w, y1), (255, 144, 30), -1)
-        cv2.putText(img, label, (x1, y1 - 5), cv2.FONT_HERSHEY_SIMPLEX,
-                    0.6, [255, 255, 255], 1)
+        cv2.putText(img, label, (x1, y1 - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.6, [255, 255, 255], 1)
         # cv2.circle(img, data, 6, color,-1)   #centroid of box
         txt_str = ""
         if save_with_object_id:
             txt_str += "%i %i %f %f %f %f %f %f" % (
                 id, cat, int(box[0])/img.shape[1], int(box[1])/img.shape[0], int(box[2]) /
-                img.shape[1], int(
-                    box[3])/img.shape[0], int(box[0] + (box[2] * 0.5))/img.shape[1],
-                int(box[1] + (
-                    box[3] * 0.5))/img.shape[0])
+                img.shape[1], int(box[3])/img.shape[0], int(box[0] + (box[2] * 0.5))/img.shape[1],
+                int(box[1] + (box[3] * 0.5))/img.shape[0])
             txt_str += "\n"
             with open(path + '.txt', 'a') as f:
                 f.write(txt_str)
 
+        # original box coordinates are inverted in x axis so we need to invert them back to get the correct coordinates of the box
+        new_box = [int(box[0]), img.shape[0] - int(box[1]), int(box[2]), img.shape[0] - int(box[3])]
+
         # ............................... Display Details ............................
         # plot the center of the screen in green color
-        cv2.circle(img, (int(img.shape[1]/2),
-                   int(img.shape[0]/2)), 6, (0, 255, 0), -1)
+        cv2.circle(img, (int(img.shape[1]/2),int(img.shape[0]/2)), 6, (0, 255, 0), -1)
 
         # draw a rectangle half the size of the screen in white color
-        cv2.rectangle(img, (int(img.shape[1]/4), int(img.shape[0]/4)), (int(
-            img.shape[1]/4*3), int(img.shape[0]/4*3)), (255, 255, 255), 2)
+        cv2.rectangle(img, (int(img.shape[1]/4), int(img.shape[0]/4)), (int(img.shape[1]/4*3), int(img.shape[0]/4*3)), (255, 255, 255), 2)
 
         # draw x and y axes for the whole frame
-        cv2.line(img, (0, int(
-            img.shape[0]/2)), (img.shape[1], int(img.shape[0]/2)), (255, 255, 255), 2)
-        cv2.line(img, (int(
-            img.shape[1]/2), 0), (int(img.shape[1]/2), img.shape[0]), (255, 255, 255), 2)
+        cv2.line(img, (0, int(img.shape[0]/2)), (img.shape[1], int(img.shape[0]/2)), (255, 255, 255), 2)
+        cv2.line(img, (int(img.shape[1]/2), 0), (int(img.shape[1]/2), img.shape[0]), (255, 255, 255), 2)
 
         # if the whole object is inside the rectangle, draw a green rectangle around it
         locked_flag = False
         if (int(box[0]) > int(img.shape[1]/4) and int(box[1]) > int(img.shape[0]/4) and int(box[2]) < int(img.shape[1]/4*3) and int(box[3]) < int(img.shape[0]/4*3)):
-            cv2.rectangle(img, (int(box[0]), int(box[1])), (int(
-                box[2]), int(box[3])), (0, 255, 0), 2)
+            cv2.rectangle(img, (int(box[0]), int(box[1])), (int(box[2]), int(box[3])), (0, 255, 0), 2)
             # display "Locked" on the screen at the top left
-            cv2.putText(img, "Locked", (10, 30),
-                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+            cv2.putText(img, "Locked", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
             locked_flag = True
 
         # else draw a red rectangle around it
         else:
-            cv2.rectangle(img, (int(box[0]), int(box[1])), (int(
-                box[2]), int(box[3])), (0, 0, 255), 2)
+            cv2.rectangle(img, (int(box[0]), int(box[1])), (int(box[2]), int(box[3])), (0, 0, 255), 2)
             # display "Not locked" on the screen at the top left
-            cv2.putText(img, "Not locked", (10, 30),
-                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+            cv2.putText(img, "Not locked", (10, 30),cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
             locked_flag = False
         # ..............................................................................
 
         # ...................................Angle..............................
         # draw a line from the center of the screen to the center of the object
-        cv2.line(img, (int(img.shape[1]/2), int(img.shape[0]/2)), (int(
-            (box[0]+box[2])/2), int((box[1]+box[3])/2)), (191, 191, 191), 2)
+        cv2.line(img, (int(img.shape[1]/2), int(img.shape[0]/2)), (int((box[0]+box[2])/2), int((box[1]+box[3])/2)), (250, 250, 250), 2)
 
-        relative_bearing = get_relative_bearing(
-            (int(img.shape[1]/2), int(img.shape[0]/2)), (int((box[0]+box[2])/2), int((box[1]+box[3])/2)))
+        relative_bearing = get_relative_bearing([int(img.shape[1]/2), int(img.shape[0]/2)], [int((new_box[0]+new_box[2])/2), int((new_box[1]+new_box[3])/2)])
         true_bearing = get_true_bearing(relative_bearing)
 
-        # display the angle between east and the line
-        # find the angle between the y-axis and midpoint of the object in anti-clockwise direction
-        # and display it on the screen
-        def get_angle(x1, y1, x2, y2):
-            angle = math.degrees(math.atan2(y2 - y1, x2 - x1))
-            return angle+90
-        angle = get_angle(int(img.shape[1]/2), int(img.shape[0]/2),
-                          int((box[0]+box[2])/2), int((box[1]+box[3])/2))
-        cv2.putText(img, str(angle), (int(
-            (box[0]+box[2])/2), int((box[1]+box[3])/2)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, [0, 0, 255], 2)
+        # display the angle between north and the line from the center of the screen to the center of the object
+        cv2.putText(img, str(int(relative_bearing)), (int((box[0]+box[2])/2), int((box[1]+box[3])/2)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, [255, 255, 255], 2)
+
+        # display the True bearing on the bottom left part of the screen
+        # cv2.putText(img, "True Bearing: " + str(relative_bearing), (10, img.shape[0]-10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, [255, 255, 255], 2)
+
+
         # ..............................................................................
 
         # ...................................Relative and True Distance..............................
@@ -263,24 +253,26 @@ def draw_boxes(img, bbox, identities=None, categories=None, names=None, save_wit
         relative_distance = get_relative_distance(
             (int(img.shape[1]/2), int(img.shape[0]/2)), (int((box[0]+box[2])/2), int((box[1]+box[3])/2)))
 
+        # display the relative distance on the bottom left part of the screen
+        cv2.putText(img, "Relative Dist: " + str(int(relative_distance)), (10, img.shape[0]-40), cv2.FONT_HERSHEY_SIMPLEX, 0.6, [255, 255, 255], 1)
+
         # below units are in meters
         true_distance = Get_true_distance(
             relative_distance, drone.vehicle.location.global_relative_frame.alt, img.shape[1])
+
+        # display the true distance on the bottom left part of the screen
+        cv2.putText(img, "True Dist: " + str(int(true_distance)), (10, img.shape[0]-20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, [255, 255, 255], 1)
         # ..............................................................................
 
         # ...................................Latitude and Longitude..............................
         # calculate the latitude and longitude of the object
-        origin = geopy.Point(drone.vehicle.location.global_relative_frame.lat,
-                             drone.vehicle.location.global_relative_frame.lon)
-        destination = geodesic(meters=true_distance).destination(
-            origin, true_bearing)
+        origin = geopy.Point(drone.vehicle.location.global_relative_frame.lat, drone.vehicle.location.global_relative_frame.lon)
+        destination = geodesic(meters=true_distance).destination(origin, true_bearing)
         lat, long = destination.latitude, destination.longitude
 
-        # display the latitude and longitude
-        cv2.putText(img, "Lat:"+str(lat), (10,
-                    img.shape[0]-30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, [255, 0, 0], 2)
-        cv2.putText(img, "Long:"+str(long), (10,
-                    img.shape[0]-10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, [255, 0, 0], 2)
+        # display the latitude and longitude on the bottom right part of the screen
+        cv2.putText(img, "Latitude: " + str(lat), (img.shape[1]-200, img.shape[0]-40), cv2.FONT_HERSHEY_SIMPLEX, 0.6, [255, 255, 255], 1)
+        cv2.putText(img, "Longitude: " + str(long), (img.shape[1]-200, img.shape[0]-20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, [255, 255, 255], 1)
         # ..............................................................................
 
         # ...................................Goto for drone..............................
@@ -412,6 +404,8 @@ def detect(save_img=False):
                 ), dataset.count
             else:
                 p, s, im0, frame = path, '', im0s, getattr(dataset, 'frame', 0)
+            
+            print(im0.shape)
 
             p = Path(p)  # to Path
             save_path = str(save_dir / p.name)  # img.jpg
@@ -604,7 +598,6 @@ if __name__ == '__main__':
         connection_string = opt.connect
 
     print('Connecting to vehicle on: %s' % connection_string)
-    # vehicle = connect(connection_string, wait_ready=True)
     vehicle = connect(connection_string, baud=opt.baud, wait_ready=True)
 
     drone = DroneControl()
