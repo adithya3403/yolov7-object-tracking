@@ -77,7 +77,7 @@ class DroneControl(object):
             if self.vehicle.location.global_relative_frame.alt >= self.altitude * 0.95:
                 print("Reached target altitude")
                 break
-            time.sleep(.1)
+            time.sleep(.5)
 
     def arm(self, value=True):
         if value:
@@ -112,8 +112,6 @@ class DroneControl(object):
         alt = self.altitude
         print("Going to: {0}, {1}, {2}".format(lat, lon, alt))
         self.vehicle.simple_goto(LocationGlobalRelative(lat, lon, alt))
-        # speed should always be 0.7m/s
-        # self.vehicle.groundspeed = 0.7
 
     def geofence(self, lat, lon):
         # using distance formula in meters using geopy
@@ -139,7 +137,7 @@ def get_relative_bearing(p1, p2):
 
 
 def get_true_bearing(relative_bearing):
-    return (360 - drone.vehicle.heading + relative_bearing) % 360
+    return (drone.vehicle.heading + relative_bearing) % 360
 
 
 def GSD(focal_length, sensor_width, image_width, altitude):
@@ -164,13 +162,11 @@ def Get_true_distance(relative_distance, altitude, image_width):
     # relative_distance -> pixels
     # altitude -> meters
     # true_distance -> meters
-    # camera specs of Raspberry Pi Camera V2
     focal_length = 3.04
     sensor_width = 3.68
     true_distance = GSD(focal_length, sensor_width,
                         image_width, altitude) * relative_distance
     return true_distance
-
 
 # ............................... Bounding Boxes Drawing ............................
 """Function to Draw Bounding boxes"""
@@ -544,7 +540,7 @@ if __name__ == '__main__':
     parser.add_argument('--img-size', type=int, default=640,
                         help='inference size (pixels)')
     parser.add_argument('--conf-thres', type=float,
-                        default=0.25, help='object confidence threshold')
+                        default=0.5, help='object confidence threshold')
     parser.add_argument('--iou-thres', type=float,
                         default=0.45, help='IOU threshold for NMS')
     parser.add_argument('--device', default='',
@@ -613,4 +609,4 @@ if __name__ == '__main__':
         else:
             detect()
 
-# python detect_and_track.py --weights best.pt --source 1 --view-img --baud 57600 --connect com3 --altitude 4 --device 0
+# python detect_and_track.py --weights best.pt --source 1 --view-img --baud 57600 --connect com3 --altitude 4 --view-img --device 0
